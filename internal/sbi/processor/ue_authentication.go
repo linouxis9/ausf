@@ -365,6 +365,7 @@ func (p *Processor) UeAuthPostRequestProcedure(
 
 	ausfUeContext := ausf_context.NewAusfUeContext(ueid)
 	ausfUeContext.ServingNetworkName = snName
+	ausfUeContext.AuthType = models.Ausf_UEAU_AuthType(authInfoResult.AuthType)
 	ausfUeContext.AuthStatus = models.Ausf_UEAU_AuthResult_ONGOING
 	ausfUeContext.UdmUeauUrl = udmUrl
 	ausf_context.AddAusfUeContextToPool(ausfUeContext)
@@ -565,6 +566,17 @@ func (p *Processor) Auth5gAkaComfirmRequestProcedure(
 		c.JSON(http.StatusBadRequest, problemDetails)
 		return
 	}
+	if *updateConfirmationData.ResStar == "" {
+		problemDetails := models.ProblemDetails{
+			Title:  "Malformed request syntax",
+			Status: http.StatusBadRequest,
+			Detail: "resStar is empty",
+			Cause:  "MANDATORY_IE_INCORRECT",
+		}
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, problemDetails.Cause)
+		c.JSON(http.StatusBadRequest, problemDetails)
+		return
+	}
 
 	if !ausf_context.CheckIfSuciSupiPairExists(ConfirmationDataResponseID) {
 		logger.Auth5gAkaLog.Infof("supiSuciPair does not exist, confirmation failed (queried by %s)\n",
@@ -592,6 +604,18 @@ func (p *Processor) Auth5gAkaComfirmRequestProcedure(
 
 	ausfCurrentContext := ausf_context.GetAusfUeContext(currentSupi)
 	servingNetworkName := ausfCurrentContext.ServingNetworkName
+
+	if ausfCurrentContext.AuthType != models.Ausf_UEAU_AuthType_5_G_AKA {
+		logger.Auth5gAkaLog.Infof("authentication of %s is not 5G AKA, confirmation failed\n",
+			ConfirmationDataResponseID)
+		problemDetails := models.ProblemDetails{
+			Cause:  "USER_NOT_FOUND",
+			Status: http.StatusBadRequest,
+		}
+		c.Set(sbi.IN_PB_DETAILS_CTX_STR, problemDetails.Cause)
+		c.JSON(http.StatusBadRequest, problemDetails)
+		return
+	}
 
 	// Compare the received RES* with the stored XRES*
 	if constantTimeHexEqual(*updateConfirmationData.ResStar, ausfCurrentContext.XresStar) {
